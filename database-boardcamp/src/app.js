@@ -1,6 +1,7 @@
 import express, { query } from 'express';
 import cors from 'cors';
 import pg from 'pg';
+import joi from 'joi';
 
 const { Pool } = pg;
 const app = express();
@@ -23,7 +24,7 @@ const connection = new Pool({
 
 app.get('/categories', async (req, res) => {
     try {
-        const query = await connection.query('SELECT * FROM categories');
+        const query = await connection.query('SELECT * FROM categories;');
         res.send(query.rows);
     } catch (error) {
         console.log(error.message);
@@ -37,11 +38,11 @@ app.post('/categories', async (req, res) => {
         res.sendStatus(400);
     } else {
         try {
-            const nameCheck = await connection.query(`SELECT name FROM categories WHERE name = $1`, [name]);
+            const nameCheck = await connection.query(`SELECT name FROM categories WHERE name = $1;`, [name]);
             if (nameCheck.rowCount !== 0) {
                 res.sendStatus(409);
             } else {
-                await connection.query(`INSERT INTO categories (name) VALUES ($1)`, [name]);
+                await connection.query(`INSERT INTO categories (name) VALUES ($1);`, [name]);
                 res.sendStatus(201);
             }
         } catch (error) {
@@ -52,7 +53,16 @@ app.post('/categories', async (req, res) => {
 
 app.get('/games', async (req, res) => {
     try {
-        const query = await connection.query('SELECT * FROM games');
+        const query = await connection.query(`
+            SELECT 
+                games.id, 
+                games.name, 
+                games.image, 
+                games."stockTotal", 
+                games."categoryId", 
+                games."pricePerDay", 
+                categories.name AS "categoryName" 
+            FROM games JOIN categories ON games."categoryId"=categories.id;`)
         res.send(query.rows);
     } catch (error) {
         console.log(error.message);
@@ -61,21 +71,34 @@ app.get('/games', async (req, res) => {
 
 app.post('/games', async (req, res) => {
     const { name, image, stockTotal, pricePerDay, categoryId } = req.body;
-    const categoryIdCompare = await connection.query(`SELECT id FROM categories WHERE id = $1`, [categoryId]);
 
-    const isCategoryIdOk = categoryIdCompare.rowCount === 0 ? true : false;
+    const gameSchema = joi.object({
+        name: joi.string().required(),
+        image: joi.string().uri().required(),
+        stockTotal: joi.number().integer().min(1).required(),
+        pricePerDay: joi.number().integer().min(1).required(),
+        categoryId: joi.number().integer().min(1).required()
+    });
 
-    if (name.length === 0 || stockTotal === 0 || pricePerDay === 0 || isCategoryIdOk) {
+    const gameSchemaValidation = gameSchema.validate({
+        name,
+        image,
+        stockTotal,
+        pricePerDay,
+        categoryId
+    })
+
+    if (gameSchemaValidation.error !== undefined) {
         res.sendStatus(400);
     } else {
-        const nameCompare = await connection.query('SELECT name FROM games WHERE name = $1', [name]);
+        const nameCompare = await connection.query('SELECT name FROM games WHERE name = $1;', [name]);
         const isNameOk = nameCompare.rowCount === 0 ? true : false;
 
-        if (!isNameOk) {
-            res.sendStatus(409);
+        if (isNameOk) {
+            await connection.query('INSERT INTO games (name, image, "stockTotal", "categoryId", "pricePerDay") VALUES ($1, $2, $3, $4, $5);', [name, image, stockTotal, categoryId, pricePerDay]);
+            res.sendStatus(201);
         } else {
-            await connection.query('INSERT INTO games (name, image, "stockTotal", "categoryId", "pricePerDay") VALUES ($1, $2, $3, $4, $5)', [name, image, stockTotal, categoryId, pricePerDay]);
-            res.send(201);
+            res.sendStatus(409);
         }
     }
 })
