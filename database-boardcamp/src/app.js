@@ -50,4 +50,34 @@ app.post('/categories', async (req, res) => {
     }
 })
 
+app.get('/games', async (req, res) => {
+    try {
+        const query = await connection.query('SELECT * FROM games');
+        res.send(query.rows);
+    } catch (error) {
+        console.log(error.message);
+    }
+})
+
+app.post('/games', async (req, res) => {
+    const { name, image, stockTotal, pricePerDay, categoryId } = req.body;
+    const categoryIdCompare = await connection.query(`SELECT id FROM categories WHERE id = $1`, [categoryId]);
+
+    const isCategoryIdOk = categoryIdCompare.rowCount === 0 ? true : false;
+
+    if (name.length === 0 || stockTotal === 0 || pricePerDay === 0 || isCategoryIdOk) {
+        res.sendStatus(400);
+    } else {
+        const nameCompare = await connection.query('SELECT name FROM games WHERE name = $1', [name]);
+        const isNameOk = nameCompare.rowCount === 0 ? true : false;
+
+        if (!isNameOk) {
+            res.sendStatus(409);
+        } else {
+            await connection.query('INSERT INTO games (name, image, "stockTotal", "categoryId", "pricePerDay") VALUES ($1, $2, $3, $4, $5)', [name, image, stockTotal, categoryId, pricePerDay]);
+            res.send(201);
+        }
+    }
+})
+
 app.listen(4000);
