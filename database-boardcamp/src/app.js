@@ -253,4 +253,69 @@ app.get('/rentals', async (req, res) => {
     }
 })
 
+function getDate(daysToAdd) {
+    let milisec = Date.now();
+    milisec += (daysToAdd * 86400000)
+
+    var date = new Date(milisec);
+    var dd = String(date.getDate()).padStart(2, '0');
+    var mm = String(date.getMonth() + 1).padStart(2, '0'); //January is 0!
+    var yyyy = date.getFullYear();
+
+    return (date)
+}
+
+const rentalSchema = joi.object({
+    daysRented: joi.number().integer().min(1).required(),
+})
+
+app.post('/rentals', async (req, res) => {
+    const { gameId, customerId, daysRented } = req.body;
+    const rentalValidation = rentalSchema.validate({
+        daysRented,
+    })
+    const gameExists = await connection.query('SELECT * FROM games WHERE id = $1', [gameId]);
+    const userExists = await connection.query('SELECT * FROM customers WHERE id = $1', [customerId]);
+
+    try {
+        const totalGames = await connection.query('SELECT "stockTotal" FROM games WHERE id = $1', [gameId]);
+        const gamesUsed = await connection.query('SELECT "gameId" FROM rentals WHERE "gameId" = $1', [gameId]);
+        const gameAvaible = totalGames.rowCount > gamesUsed.rowCount ? true : false;
+
+        if (rentalValidation.error !== undefined || gameExists.rowCount === 0 || userExists.rowCount === 0 || !gameAvaible) {
+            res.sendStatus(400);
+        } else {
+            try {
+                const today = getDate(0);
+                const returnDate = getDate(daysRented);
+                const gamePrice = await connection.query(`SELECT "pricePerDay" FROM games WHERE id = $1`, [gameId]);
+                const newGamePrice = gamePrice.rows[0].pricePerDay * daysRented;
+
+                await connection.query(`
+                INSERT INTO rentals (
+                    "customerId",
+                    "gameId",
+                    "rentDate",
+                    "daysRented",
+                    "returnDate",
+                    "originalPrice"
+                ) VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [
+                        customerId,
+                        gameId,
+                        today,
+                        daysRented,
+                        returnDate,
+                        newGamePrice
+                    ]);
+                res.sendStatus(201)
+            } catch (error) {
+                console.log(error.message);
+            }
+        }
+    } catch (error) {
+        console.log(error.message);
+    }
+})
+
 app.listen(4000);
