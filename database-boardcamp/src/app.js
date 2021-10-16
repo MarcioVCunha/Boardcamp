@@ -24,8 +24,8 @@ const connection = new Pool({
 
 app.get('/categories', async (req, res) => {
     try {
-        const query = await connection.query('SELECT * FROM categories;');
-        res.send(query.rows);
+        const categoriesTable = await connection.query('SELECT * FROM categories;');
+        res.send(categoriesTable.rows);
     } catch (error) {
         console.log(error.message);
     }
@@ -53,17 +53,14 @@ app.post('/categories', async (req, res) => {
 
 app.get('/games', async (req, res) => {
     try {
-        const query = await connection.query(`
-            SELECT 
-                games.id, 
-                games.name, 
-                games.image, 
-                games."stockTotal", 
-                games."categoryId", 
-                games."pricePerDay", 
-                categories.name AS "categoryName" 
-            FROM games JOIN categories ON games."categoryId"=categories.id;`)
-        res.send(query.rows);
+        const joinGamesCategory = await connection.query(`
+            SELECT
+                games.*,
+                categories.name AS "categoryName"
+            FROM games
+                JOIN categories
+                    ON games."categoryId"=categories.id;`)
+        res.send(joinGamesCategory.rows);
     } catch (error) {
         console.log(error.message);
     }
@@ -95,11 +92,164 @@ app.post('/games', async (req, res) => {
         const isNameOk = nameCompare.rowCount === 0 ? true : false;
 
         if (isNameOk) {
-            await connection.query('INSERT INTO games (name, image, "stockTotal", "categoryId", "pricePerDay") VALUES ($1, $2, $3, $4, $5);', [name, image, stockTotal, categoryId, pricePerDay]);
+            await connection.query(`
+                INSERT INTO games (
+                    name, 
+                    image, 
+                    "stockTotal", 
+                    "categoryId", 
+                    "pricePerDay"
+                ) VALUES (
+                    $1, 
+                    $2, 
+                    $3, 
+                    $4, 
+                    $5
+                );`, [name, image, stockTotal, categoryId, pricePerDay]);
             res.sendStatus(201);
         } else {
             res.sendStatus(409);
         }
+    }
+})
+
+app.get('/customers', async (req, res) => {
+    try {
+        const customersTable = await connection.query('SELECT * FROM customers;');
+        res.send(customersTable.rows);
+    } catch (error) {
+        console.log(error.message);
+    }
+});
+
+app.get('/customers/:id', async (req, res) => {
+    const id = req.params['id'];
+    try {
+        const customersById = await connection.query('SELECT * FROM customers WHERE id = $1;', [id]);
+        res.send(customersById.rows[0]);
+    } catch (error) {
+        console.log(error.message);
+        res.sendStatus(404);
+    }
+})
+
+const customerSchema = joi.object({
+    name: joi.string().required(),
+    phone: joi.string().regex(/^[0-9]{10,11}/).required(),
+    cpf: joi.string().regex(/^[0-9]{11}/).required(),
+    birthday: joi.string().regex(/^[0-9]{4}\-[0-9]{2}\-[0-9]{2}/)
+})
+
+app.post('/customers/', async (req, res) => {
+    const { name, phone, cpf, birthday } = req.body;
+
+    const customerSchemaValidation = customerSchema.validate({
+        name,
+        phone,
+        cpf,
+        birthday
+    });
+
+    const cpfCompare = await connection.query('SELECT cpf FROM customers WHERE cpf = $1;', [cpf]);
+    const isCpfOk = cpfCompare.rowCount === 0 ? true : false;
+
+    if (customerSchemaValidation.error !== undefined) {
+        res.sendStatus(400);
+    } else if (isCpfOk) {
+        try {
+            await connection.query(`
+            INSERT INTO customers (
+                name, 
+                phone, 
+                cpf, 
+                birthday
+            ) VALUES ( $1, $2, $3, $4)
+        `, [name, phone, cpf, birthday])
+            res.sendStatus(201);
+        } catch (error) {
+            console.log(error.message);
+        }
+    } else {
+        res.sendStatus(409);
+    }
+})
+
+app.put('/customers/:id', async (req, res) => {
+    const { name, phone, cpf, birthday } = req.body;
+
+    const customerSchemaValidation = customerSchema.validate({
+        name,
+        phone,
+        cpf,
+        birthday
+    });
+
+    if (customerSchemaValidation.error !== undefined) {
+        res.sendStatus(400);
+    } else {
+        const cpfCompare = await connection.query('SELECT cpf FROM customers WHERE cpf = $1;', [cpf]);
+        const isCpfOk = cpfCompare.rowCount === 0 ? true : false;
+
+        try {
+            if (cpf === cpfCompare.rows[0].cpf) {
+                await connection.query(`
+                    UPDATE customers
+                    SET name = $1, phone = $2, birthday = $4
+                    WHERE cpf = $3;
+                `, [name, phone, cpf, birthday]);
+                res.sendStatus(201);
+            }
+        } catch {
+            if (isCpfOk) {
+                await connection.query(`
+                    UPDATE customers
+                    SET cpf = $1
+                    WHERE name = $2
+                `, [cpf, name]);
+                res.sendStatus(201);
+            } else {
+                res.sendStatus(409);
+            }
+        }
+    }
+})
+
+app.get('/rentals', async (req, res) => {
+    try {
+        const rentalsList = await connection.query('SELECT * FROM rentals');
+        const rentalListComplete = [];
+
+        for (let i = 0; i < rentalsList.rowCount; i++) {
+            let rental = rentalsList.rows[i];
+            const customerId = rental.customerId;
+            const gameId = rental.gameId;
+
+            const game = await connection.query(`
+            SELECT 
+                games.id, 
+                games.name, 
+                games."categoryId", 
+                categories."name" AS "categoryName"
+            FROM games 
+                JOIN categories 
+                    ON games."categoryId" = categories.id 
+            WHERE games.id = $1;`
+                , [gameId]);
+
+            const customer = await connection.query('SELECT id, name FROM customers WHERE id = $1', [customerId]);
+
+            rental = {
+                ...rental,
+                game: game.rows[0],
+                customer: customer.rows[0]
+            }
+
+            rentalListComplete.push(rental);
+        }
+
+        res.send(rentalListComplete);
+    } catch (error) {
+        console.log(error.message)
     }
 })
 
