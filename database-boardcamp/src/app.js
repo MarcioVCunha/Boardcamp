@@ -353,4 +353,19 @@ app.post('/rentals/:id/return', async (req, res) => {
     }
 })
 
+app.delete('/rentals/:id', async (req, res) => {
+    const id = req.params['id'];
+
+    const rentalInfo = await connection.query('SELECT * FROM rentals WHERE id = $1;', [id]);
+    
+    if(rentalInfo.rowCount === 0){
+        res.sendStatus(404);
+    } else if(rentalInfo.rows[0].returnDate !== null){
+        res.sendStatus(400);
+    } else {
+        await connection.query('DELETE FROM rentals WHERE id = $1', [id]);
+        res.sendStatus(200);
+    }
+})
+
 app.listen(4000);
