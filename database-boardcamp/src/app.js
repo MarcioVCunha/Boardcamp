@@ -357,10 +357,10 @@ app.delete('/rentals/:id', async (req, res) => {
     const id = req.params['id'];
 
     const rentalInfo = await connection.query('SELECT * FROM rentals WHERE id = $1;', [id]);
-    
-    if(rentalInfo.rowCount === 0){
+
+    if (rentalInfo.rowCount === 0) {
         res.sendStatus(404);
-    } else if(rentalInfo.rows[0].returnDate !== null){
+    } else if (rentalInfo.rows[0].returnDate !== null) {
         res.sendStatus(400);
     } else {
         await connection.query('DELETE FROM rentals WHERE id = $1', [id]);
