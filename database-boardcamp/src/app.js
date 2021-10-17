@@ -253,14 +253,11 @@ app.get('/rentals', async (req, res) => {
     }
 })
 
-function getDate(daysToAdd) {
-    let milisec = Date.now();
-    milisec += (daysToAdd * 86400000)
-
-    var date = new Date(milisec);
-    var dd = String(date.getDate()).padStart(2, '0');
-    var mm = String(date.getMonth() + 1).padStart(2, '0'); //January is 0!
-    var yyyy = date.getFullYear();
+function myGetDate() {
+    const date = new Date();
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0'); //January is 0!
+    const yyyy = date.getFullYear();
 
     return (date)
 }
@@ -286,8 +283,7 @@ app.post('/rentals', async (req, res) => {
             res.sendStatus(400);
         } else {
             try {
-                const today = getDate(0);
-                const returnDate = getDate(daysRented);
+                const today = myGetDate(0);
                 const gamePrice = await connection.query(`SELECT "pricePerDay" FROM games WHERE id = $1`, [gameId]);
                 const newGamePrice = gamePrice.rows[0].pricePerDay * daysRented;
 
@@ -298,14 +294,14 @@ app.post('/rentals', async (req, res) => {
                     "rentDate",
                     "daysRented",
                     "returnDate",
-                    "originalPrice"
-                ) VALUES ($1, $2, $3, $4, $5, $6)`,
+                    "originalPrice",
+                    "delayFee"
+                ) VALUES ($1, $2, $3, $4, null,$5, null)`,
                     [
                         customerId,
                         gameId,
                         today,
                         daysRented,
-                        returnDate,
                         newGamePrice
                     ]);
                 res.sendStatus(201)
@@ -315,6 +311,45 @@ app.post('/rentals', async (req, res) => {
         }
     } catch (error) {
         console.log(error.message);
+    }
+})
+
+async function getDaysDelayed(daysRented, rentDate) {
+    const rentDateMilisec = Date.parse(rentDate);
+    const todayInMilisec = Date.parse(myGetDate());
+    const dayToReturn = (rentDateMilisec + (daysRented * 86400000));
+
+    if (dayToReturn < todayInMilisec) {
+        const delayTime = todayInMilisec - dayToReturn;
+        return (Math.ceil(delayTime / 86400000))
+    } else {
+        return (0);
+    }
+}
+
+app.post('/rentals/:id/return', async (req, res) => {
+    const id = req.params['id'];
+
+    const rentalInfo = await connection.query('SELECT * FROM rentals WHERE id = $1;', [id]);
+    const { returnDate, daysRented, rentDate, originalPrice } = rentalInfo.rows[0];
+
+    if (rentalInfo.rowCount === 0) {
+        res.sendStatus(404);
+    } else if (returnDate !== null) {
+        res.sendStatus(400);
+    } else {
+        const daysDelayed = await getDaysDelayed(daysRented, rentDate);
+        await connection.query('UPDATE rentals SET "returnDate" = ($1) WHERE id = $2', [myGetDate(), id]);
+        if (daysDelayed === 0) {
+            res.sendStatus(200);
+        } else {
+            const taxDelayedDays = (originalPrice / daysRented) * daysDelayed;
+            try {
+                await connection.query('UPDATE rentals SET "delayFee" = ($1) WHERE id = $2;', [taxDelayedDays, id]);
+            } catch (error) {
+                console.log(error.message);
+            }
+        }
     }
 })
 
